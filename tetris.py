@@ -132,6 +132,8 @@ class Board:
         if len(clear_row) > 0:
             reward = len(clear_row) * (10 + len(clear_row) - 1) 
             self.cells = np.vstack([np.zeros((len(clear_row), BOARD_WIDTH), dtype=np.int8), np.delete(self.cells, clear_row, axis=0)])
+            if np.all(self.cells == 0):
+                reward += 100
         self.score += reward
         return reward
 
