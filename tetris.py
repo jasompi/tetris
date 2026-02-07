@@ -101,6 +101,7 @@ class Board:
         self.gameover = False
         self.cells = np.zeros((BOARD_HEIGHT, BOARD_WIDTH), dtype=np.int8)
         self._drop_pos: Optional[Position] = None
+        self.next_shape = random.choice(SHAPES)
         self.new_block()
 
     @property
@@ -112,7 +113,8 @@ class Board:
         if self.gameover:
             return
         if not shape in SHAPES:
-            shape = random.choice(SHAPES)
+            shape = self.next_shape
+            self.next_shape = random.choice(SHAPES)
         self.block: Block = Block(shape)
         self.block_count += 1
         self._drop_pos = None
@@ -190,6 +192,50 @@ class Board:
         return str(self.state())
 
 
+def render_next_block_preview(ax, board: Board, cmap, preview_x_left=-5.5, preview_y_top=3.0):
+    """Render the next block preview on the left side of the board."""
+    preview_width = 4
+    preview_height = 2
+
+    # Create temporary block and preview grid
+    next_block = Block(board.next_shape, Position(0, 0))
+    preview_cells = np.zeros((preview_height, preview_width), dtype=np.int8)
+
+    # Center block in preview area
+    offset_x = (preview_width - next_block.width) // 2
+    offset_y = (preview_height - next_block.height) // 2
+    preview_cells[offset_y:offset_y+next_block.height,
+                  offset_x:offset_x+next_block.width] = next_block.cells
+
+    # Calculate positioning for imshow
+    preview_y_bottom = preview_y_top + preview_height
+
+    # Render preview with imshow
+    ax.imshow(preview_cells, cmap=cmap, vmin=0, vmax=5,
+              extent=[preview_x_left - 0.5, preview_x_left + preview_width - 0.5,
+                      preview_y_bottom - 0.5, preview_y_top - 0.5],
+              aspect='equal')
+
+    # Draw grid lines only where block cells exist
+    for row in range(preview_height):
+        for col in range(preview_width):
+            if preview_cells[row, col] > 0:
+                cell_x_left = preview_x_left + col - 0.5
+                cell_x_right = preview_x_left + col + 0.5
+                cell_y_top = preview_y_top + row - 0.5
+                cell_y_bottom = preview_y_top + row + 0.5
+
+                # Draw cell borders
+                ax.vlines([cell_x_left, cell_x_right], cell_y_top, cell_y_bottom,
+                         color='gray', linewidth=0.5)
+                ax.hlines([cell_y_top, cell_y_bottom], cell_x_left, cell_x_right,
+                         color='gray', linewidth=0.5)
+
+    # Add "Next:" label (left-aligned with preview)
+    ax.text(preview_x_left, preview_y_top - 1.0, "Next:",
+            fontsize=12, fontweight='bold', ha='left', va='center')
+
+
 def plot_board(board: Board):
     """Plot the Tetris board using matplotlib."""
     colors = ['white', 'red', 'orange', 'yellow', 'green', 'blue']
@@ -218,7 +264,10 @@ def plot_board(board: Board):
     ax.text(text_x, 4, f"{board.level}", fontsize=14, ha='left', va='center')
     ax.text(text_x, 7, f"Score", fontsize=12, fontweight='bold', ha='left', va='center')
     ax.text(text_x, 9, f"{board.score}", fontsize=14, ha='left', va='center')
-    
+
+    # Render next block preview on the left
+    render_next_block_preview(ax, board, cmap)
+
     # Display Game Over message if game is over
     if board.gameover:
         ax.text(BOARD_WIDTH / 2 - 0.5, BOARD_HEIGHT / 2 - 0.5, "GAME OVER",
@@ -231,7 +280,7 @@ def plot_board(board: Board):
     # Remove axes, ticks, and spines
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_xlim(-0.5, BOARD_WIDTH - 0.5)
+    ax.set_xlim(-6.5, 15.5)  # Equal padding on left and right (symmetric around board center at 4.5)
     ax.set_ylim(BOARD_HEIGHT - 0.5, -0.5)
     ax.set_aspect('equal')
     for spine in ax.spines.values():
