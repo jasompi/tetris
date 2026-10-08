@@ -143,7 +143,7 @@ class Board:
         h, w = block_cell.shape
         if pos.x < 0 or pos.x + w > BOARD_WIDTH or pos.y + h > BOARD_HEIGHT:
             return True
-        return np.any(self.cells[pos.y:pos.y+h, pos.x:pos.x+w] * block_cell > 0)
+        return bool(np.any(self.cells[pos.y:pos.y+h, pos.x:pos.x+w] * block_cell > 0))
 
     @property    
     def drop_pos(self) -> Position:

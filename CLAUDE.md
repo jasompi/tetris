@@ -4,64 +4,51 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Tetris game implementation in Python using NumPy for game logic and Matplotlib for visualization and user input.
+Tetris in Python: NumPy for game logic, Matplotlib for rendering and keyboard input. All game code lives in `tetris.py`. `main.py` is the unused `uv init` stub; `agent_player.py` is currently an empty placeholder.
 
-## Running the Game
+## Commands
 
 ```bash
-# Using Python directly
-python tetris.py
-
-# Or using uv
-uv run tetris.py
+uv sync            # install dependencies
+uv run tetris.py   # run the game (opens a Matplotlib window)
 ```
 
-## Controls
-
-- Arrow keys: Left/Right to move, Up to rotate, Down to hard drop
-- Space: Soft drop (one step down)
-- Enter: Reset game (when game over)
-- Escape: Exit
-- Number keys 0-5: Spawn specific blocks (0 = random, 1-5 = I/J/L/O/T shapes)
+There is no test suite, linter, or build step configured. `testGame()` and `testRotation()` in `tetris.py` are visual smoke tests that drive a `Board` through scripted actions; they aren't wired to anything, so call them manually (e.g. temporarily from `__main__`) with a `Board()` instance.
 
 ## Architecture
 
-### Core Components
+### Layering
 
-**Block** (`tetris.py:59-93`)
-- Represents a single Tetris piece with shape, position, and rotation state
-- Uses numpy arrays for cell representation colored by `COLORS` dict
-- Position is tracked via top-left corner (y, x coordinates)
-- `ROTATION_ADJUST` dict handles position correction after rotation to keep blocks on-board
+- **`Board` / `Block` / `Position`** are pure game state with no Matplotlib dependency. `Board` can be driven headlessly via `perform()`, `freeze()`, `new_block()`, and `state()`; `freeze()` returns the reward for the placed piece (−1000 on game over), which makes it usable by non-GUI players.
+- **`plot_board()`** is pure rendering (board, grid, score/level, next-piece preview via `render_next_block_preview()`, game-over overlay). It calls `plt.pause()`, which pumps the GUI event loop.
+- **`play_board()`** sits between them: it handles hard drop (animated step-by-step, then `freeze()` + `new_block()`), reset, and otherwise delegates to `board.perform()`, then re-renders. Because it always calls `plot_board()`, it is not headless.
 
-**Board** (`tetris.py:94-191`)
-- Manages the 10x20 game grid using a numpy array
-- Handles collision detection via `conflict()` method
-- Line clearing with reward calculation: `len(clear_row) * (10 + len(clear_row) - 1)`
-- Special +100 reward when entire board is cleared
-- `drop_pos` property calculates where current block would land (cached for performance)
+### Game loop and input
 
-**Game Loop** (`tetris.py:334-360`)
-- Uses `matplotlib.animation.FuncAnimation` for auto-drop timing
-- Action queue (`action_queue`) prevents re-entrancy issues from `plt.pause()` event processing
-- Keyboard events are queued in `on_key_press()` and processed in `auto_drop()` callback
+- `FuncAnimation` fires `auto_drop()` every `RENDER_INTERVAL` seconds; it drains `action_queue` then performs one `'v'` step.
+- `on_key_press()` only *enqueues* actions. This is deliberate: `plt.pause()` inside rendering processes events, so executing actions directly in the key handler would re-enter game logic mid-update.
+- A `'v'` when the block is already at `drop_pos` is treated as a landing (freeze + next block) in `play_board()`.
 
-### Key Design Patterns
+### Action encoding
 
-1. **Coordinate System**: Position uses (y, x) not (x, y) - y is row, x is column
-2. **Conflict Detection**: Board cells and block cells are multiplied to detect overlap (both must be non-zero)
-3. **Render Separation**: `plot_board()` is pure rendering, `play_board()` handles game state updates
-4. **Action Encoding**: String-based actions ('<', '>', '@', 'v', 'V') for movement/rotation
+| Action | Meaning | Handled in |
+|---|---|---|
+| `<` `>` | move left/right | `Board.perform` |
+| `@` | rotate clockwise | `Board.perform` |
+| `v` | step down one row (lands if already at bottom) | `Board.perform` / `play_board` |
+| `V` | hard drop | `play_board` only |
+| `.` | reset | `play_board` only |
+| any other string | `new_block(action)` — a shape letter spawns that shape, anything else (e.g. `''`, `'+'`) spawns `next_shape` | `Board.perform` default case |
 
-### Testing Functions
+Note the fallthrough: passing `V` or `.` straight to `Board.perform()` spawns a new block instead of dropping/resetting.
 
-- `testGame()`: Runs a hardcoded sequence of moves
-- `testRotation()`: Tests all piece rotations through 8 cycles
+### Key details
 
-## Dependencies
-
-- Python >= 3.12
-- numpy >= 2.3.5
-- matplotlib >= 3.8.0
-
-Package management uses `uv` with `pyproject.toml` and `uv.lock`.
+- Coordinates are `(y, x)` — row, column. `Block.pos` is the top-left corner of the block's bounding box.
+- Only 5 shapes (I, J, L, O, T — no S/Z). Cell values equal the shape's `COLORS` index (1–5), and `plot_board` uses a 6-entry colormap with `vmin=0, vmax=5`; adding a shape requires updating `SHAPES`, `BLOCKS`, `ROTATION_ADJUST`, `COLORS`, the colormap, and the number-key handler.
+- Rotation is `np.rot90(cells, -1)` plus a per-shape, per-rotation offset from `ROTATION_ADJUST` (cycled by `rotation_count`), then clamped to the board. There are no wall kicks; a rotation that conflicts is simply rejected.
+- Collision (`conflict()`): bounds check, then element-wise product of the board slice and block cells — any non-zero product is an overlap.
+- `drop_pos` is cached in `_drop_pos`; any code that changes the block's x position, rotation, or the board must reset `_drop_pos = None`.
+- Game over is detected at spawn: if the new block's spawn position already equals its `drop_pos`.
+- Scoring: `n` cleared rows give `n * (10 + n - 1)`; +100 if the board is empty afterward. Level is `block_count // 50 + 1` and is display-only (does not change drop speed).
+- `Position.__sub__` has a bug (`self.x - pos.y`); it's currently unused.
